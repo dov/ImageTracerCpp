@@ -58,15 +58,17 @@ const string versionnumber = "1.1.2";
 // Forward declarations
 class ImageData;
 class IndexedImage;
-static map<string,float> checkoptions (map<string,float> options);
+static map<string,double> checkoptions (map<string,double> options);
 static string imagedataToSVG (const ImageData& imgd,
-                              map<string,float> options,
-                              const vector<vector<uint8_t>>& palette);
+                              map<string,double> options,
+                              const vector<array<uint8_t,4>>& palette);
 static IndexedImage imagedataToTracedata (const ImageData& imgd,
-                                          const map<string,float>& options,
-                                          const vector<vector<uint8_t>>& palette);
-static string getsvgstring (IndexedImage ii, map<string,float> options);
-static IndexedImage colorquantization (ImageData imgd, vector<vector<uint8_t>>palette, const map<string,float>& options);
+                                          const map<string,double>& options,
+                                          const vector<array<uint8_t,4>>& palette);
+static string getsvgstring (IndexedImage ii, map<string,double> options);
+static IndexedImage colorquantization (ImageData imgd,
+                                       vector<array<uint8_t,4>> palette,
+                                       const map<string,double>& options);
 static vector<vector<vector<int>>> layering (IndexedImage ii);
 static vector<vector<vector<int>>> pathscan (vector<vector<int>>& arr,
                                              int pathomit);
@@ -75,20 +77,20 @@ static vector<vector<vector<vector<int>>>> batchpathscan(
 static vector<vector<vector<double>>> internodes (vector<vector<vector<int>>> paths);
 static vector<vector<vector<vector<double>>>> batchinternodes (vector<vector<vector<vector<int>>>> bpaths);
 static vector<vector<double>> tracepath (vector<vector<double>> path,
-                                         float ltreshold,
-                                         float qtreshold);
+                                         double ltreshold,
+                                         double qtreshold);
 static vector<vector<double>> fitseq (vector<vector<double>> path,
-                                      float ltreshold,
-                                      float qtreshold,
+                                      double ltreshold,
+                                      double qtreshold,
                                       int seqstart,
                                       int seqend);
-static vector<vector<vector<double>>> batchtracepaths (vector<vector<vector<double>>> internodepaths, float ltres,float qtres);
-static vector<vector<vector<vector<double>>>> batchtracelayers (vector<vector<vector<vector<double>>>> binternodes, float ltres, float qtres);
-static vector<vector<uint8_t>> samplepalette (int numberofcolors,
-                                              ImageData imgd);
-static vector<vector<uint8_t>> generatepalette (int numberofcolors);
-static ImageData blur (ImageData imgd, float rad, float del);
-static string tosvgcolorstr (const vector<uint8_t>& c);
+static vector<vector<vector<double>>> batchtracepaths (vector<vector<vector<double>>> internodepaths, double ltres,double qtres);
+static vector<vector<vector<vector<double>>>> batchtracelayers (vector<vector<vector<vector<double>>>> binternodes, double ltres, double qtres);
+static vector<array<uint8_t,4>> samplepalette (int numberofcolors,
+                                               ImageData imgd);
+static vector<array<uint8_t,4>> generatepalette (int numberofcolors);
+static ImageData blur (ImageData imgd, double rad, double del);
+static string tosvgcolorstr (const array<uint8_t,4>& c);
 
 // Container for the color-indexed image before and tracedata after vectorizing
 class IndexedImage
@@ -96,13 +98,13 @@ class IndexedImage
   public:
   int width, height;
   vector<vector<int>> aray; // aray[x][y] of palette colors
-  vector<vector<uint8_t>> palette;// array[palettelength][4] RGBA color palette
+  vector<array<uint8_t,4>> palette;// array[palettelength][4] RGBA color palette
   vector<vector<vector<vector<double>>>> layers; // tracedata
 
   public:
   // Constructor
   IndexedImage(const vector<vector<int>>& marray,
-               const vector<vector<uint8_t>>& mpalette)
+               const vector<array<uint8_t,4>>& mpalette)
   {
     aray = marray;
     palette = mpalette;
@@ -112,7 +114,6 @@ class IndexedImage
   }
 };
 
-// https://developer.mozilla.org/en-US/docs/Web/API/ImageData
 class ImageData
 {
   public:
@@ -139,22 +140,25 @@ static ImageData loadImageData (const string& filename)
   string Line;
   getline(file, Line);
   if (Line!="P6")
-    throw("Expected a P6 (PPM) file!");
+    throw runtime_error("Expected a P6 (PPM) file!");
 
+  // Skip comments
   getline(file,Line);
   while(Line.size() && Line[0]=='#')
     getline(file,Line);
 
+  // Get image size
   stringstream ss(Line);
   int Width, Height;
   ss >> Width >> Height;
     
+  // Get bit depth. We only support 8-bit images
   getline(file,Line);
   if (Line!="255")
     throw runtime_error("Expected a 8-bit ppm file");
 
+  // Allocate and read the image data one pixel at a time
   vector<uint8_t> Data(Width*Height*4, 0);
-
   for (int i=0; i<Width * Height; i++)
   {
     uint32_t pixel;
@@ -176,9 +180,10 @@ static ImageData loadImageData (const string& filename)
 ////////////////////////////////////////////////////////////
 
 // Loading an image from a file, tracing when loaded, then returning the SVG string
-static string imageToSVG (const string& filename,
-                          map<string,float> options,
-                          const vector<vector<uint8_t>>& palette = vector<vector<uint8_t>>())
+static string imageToSVG (
+  const string& filename,
+  map<string,double> options,
+  const vector<array<uint8_t,4>>& palette = vector<array<uint8_t,4>>())
 {
   options = checkoptions(options);
   ImageData imgd = loadImageData(filename);
@@ -187,8 +192,8 @@ static string imageToSVG (const string& filename,
 
 // Tracing ImageData, then returning the SVG string
 static string imagedataToSVG (const ImageData& imgd,
-                              map<string,float> options,
-                              const vector<vector<uint8_t>>& palette)
+                              map<string,double> options,
+                              const vector<array<uint8_t,4>>& palette)
 {
   options = checkoptions(options);
   IndexedImage ii = imagedataToTracedata(imgd,options,palette);
@@ -198,8 +203,8 @@ static string imagedataToSVG (const ImageData& imgd,
 
 // Loading an image from a file, tracing when loaded, then returning IndexedImage with tracedata in layers
 static IndexedImage imageToTracedata (const string& filename,
-                                      map<string,float> options,
-                                      const vector<vector<uint8_t>>& palette)
+                                      map<string,double> options,
+                                      const vector<array<uint8_t,4>>& palette)
 {
   options = checkoptions(options);
   ImageData imgd = loadImageData(filename);
@@ -208,8 +213,8 @@ static IndexedImage imageToTracedata (const string& filename,
 
 // Tracing ImageData, then returning IndexedImage with tracedata in layers
 static IndexedImage imagedataToTracedata (const ImageData& imgd,
-                                          const map<string,float>& options,
-                                          const vector<vector<uint8_t>>& palette)
+                                          const map<string,double>& options,
+                                          const vector<array<uint8_t,4>>& palette)
 {
   // 1. Color quantization
   IndexedImage ii = colorquantization(imgd, palette, options);
@@ -228,7 +233,7 @@ static IndexedImage imagedataToTracedata (const ImageData& imgd,
 
 
 // creating options object, setting defaults for missing values
-static map<string,float> checkoptions (map<string,float> options)
+static map<string,double> checkoptions (map<string,double> options)
 {
   // Tracing
   if(!options.count("ltres")){ options["ltres"]=1; }
@@ -267,10 +272,10 @@ static double frand()
 
 // 1. Color quantization repeated "cycles" times, based on K-means clustering
 // https://en.wikipedia.org/wiki/Color_quantization    https://en.wikipedia.org/wiki/K-means_clustering
-static IndexedImage colorquantization (ImageData imgd, vector<vector<uint8_t>>palette, const map<string,float>& options)
+static IndexedImage colorquantization (ImageData imgd, vector<array<uint8_t,4>> palette, const map<string,double>& options)
 {
   int numberofcolors = (int)floor(options.at("numberofcolors"));
-  float minratio = options.at("mincolorratio");
+  double minratio = options.at("mincolorratio");
   int cycles = (int)floor(options.at("colorquantcycles"));
 
   // Creating indexed color array arr which has a boundary filled with -1 in every direction
@@ -306,8 +311,7 @@ static IndexedImage colorquantization (ImageData imgd, vector<vector<uint8_t>>pa
     imgd = blur( imgd, options.at("blurradius"), options.at("blurdelta") );
   }
 
-  vector<vector<int>> paletteacc(palette.size(),
-                                 vector<int>(5,0));
+  vector<array<int,5>> paletteacc(palette.size(), array<int,5>());
 
   // Repeat clustering step "cycles" times
   for(int cnt=0;cnt<cycles;cnt++)
@@ -315,7 +319,7 @@ static IndexedImage colorquantization (ImageData imgd, vector<vector<uint8_t>>pa
     // Average colors from the second iteration
     if(cnt>0){
       // averaging paletteacc for palette
-      float ratio;
+      double ratio;
       for(size_t k=0;k<palette.size();k++)
       {
         // averaging
@@ -326,7 +330,7 @@ static IndexedImage colorquantization (ImageData imgd, vector<vector<uint8_t>>pa
           palette[k][2] = (uint8_t)(paletteacc[k][2] / paletteacc[k][4]);
           palette[k][3] = (uint8_t)(paletteacc[k][3] / paletteacc[k][4]);
         }
-        ratio = (float)( (double)(paletteacc[k][4]) / (double)(imgd.width*imgd.height) );
+        ratio = ( (double)(paletteacc[k][4]) / (double)(imgd.width*imgd.height) );
 
         // Randomizing a color, if there are too few pixels and there will be a new cycle
         if( (ratio<minratio) && (cnt<(cycles-1)) )
@@ -397,9 +401,9 @@ static IndexedImage colorquantization (ImageData imgd, vector<vector<uint8_t>>pa
 
 
 // Generating a palette with numberofcolors, array[numberofcolors][4] where [i][0] = R ; [i][1] = G ; [i][2] = B ; [i][3] = A
-static vector<vector<uint8_t>> generatepalette (int numberofcolors)
+static vector<array<uint8_t,4>> generatepalette (int numberofcolors)
 {
-  vector<vector<uint8_t>> palette(numberofcolors, vector<uint8_t>(4,0));
+  vector<array<uint8_t,4>> palette(numberofcolors, array<uint8_t,4>());
 
   if (numberofcolors<8)
   {
@@ -450,12 +454,11 @@ static vector<vector<uint8_t>> generatepalette (int numberofcolors)
 };// End of generatepalette()
 
 
-static vector<vector<uint8_t>> samplepalette (int numberofcolors,
-                                              ImageData imgd)
+static vector<array<uint8_t,4>> samplepalette (int numberofcolors,
+                                               ImageData imgd)
 {
   int idx=0;
-  vector<vector<uint8_t>> palette(numberofcolors,
-                                  vector<uint8_t>(4,0));
+  vector<array<uint8_t,4>> palette(numberofcolors, array<uint8_t,4>());
 
   for(int i=0; i<numberofcolors; i++)
   {
@@ -482,8 +485,7 @@ static vector<vector<vector<int>>> layering (IndexedImage ii)
   
   vector<vector<vector<int>>> layers(
     ii.palette.size(),
-    vector<vector<int>>(ah,
-                        vector<int>(aw,0)));
+    vector<vector<int>>(ah, vector<int>(aw,0)));
 
   // Looping through all pixels and calculating edge node type
   for(int j=1; j<(ah-1); j++)
@@ -568,7 +570,7 @@ static vector<vector<vector<int>>> pathscan (vector<vector<int>>& arr,
         // Init
         px = i; py = j;
         paths.push_back(vector<vector<int>>());
-        auto& thispath = paths[paths.size()-1];
+        auto& thispath = paths.back();
         pathfinished = false;
 
         // fill paths will be drawn, but hole paths are also required to remove unnecessary edge nodes
@@ -580,9 +582,9 @@ static vector<vector<vector<int>>> pathscan (vector<vector<int>>& arr,
         {
           // New path point
           thispath.push_back(vector<int>(3,0));
-          thispath[thispath.size()-1][0] = px-1;
-          thispath[thispath.size()-1][1] = py-1;
-          thispath[thispath.size()-1][2] = arr[py][px];
+          thispath.back()[0] = px-1;
+          thispath.back()[1] = py-1;
+          thispath.back()[2] = arr[py][px];
 
           // Next: look up the replacement, direction and coordinate changes = clear this cell, turn if required, walk forward
           const int8_t* lookuprow = pathscan_combined_lookup[ arr[py][px] ][ dir ];
@@ -638,7 +640,7 @@ static vector<vector<vector<double>>> internodes (vector<vector<vector<int>>> pa
   for(size_t pacnt=0; pacnt<paths.size(); pacnt++)
   {
     ins.push_back(vector<vector<double>>());
-    auto& thisinp = ins[ins.size()-1];
+    auto& thisinp = ins.back();
     palen = paths[pacnt].size();
 
     // pathpoints loop
@@ -647,7 +649,7 @@ static vector<vector<vector<double>>> internodes (vector<vector<vector<int>>> pa
       // interpolate between two path points
       nextidx = (pcnt+1)%palen; nextidx2 = (pcnt+2)%palen;
       thisinp.push_back(vector<double>(3,0));
-      auto& thispoint = thisinp[thisinp.size()-1];
+      auto& thispoint = thisinp.back();
       pp1 = paths[pacnt][pcnt];
       pp2 = paths[pacnt][nextidx];
       pp3 = paths[pacnt][nextidx2];
@@ -719,8 +721,8 @@ static vector<vector<vector<vector<double>>>> batchinternodes (vector<vector<vec
 // path type is discarded, no check for path.size < 3 , which should not happen
 
 static vector<vector<double>> tracepath (vector<vector<double>> path,
-                                         float ltreshold,
-                                         float qtreshold)
+                                         double ltreshold,
+                                         double qtreshold)
 {
   int pcnt=0, seqend=0; double segtype1, segtype2;
   vector<vector<double>> smp;
@@ -762,8 +764,8 @@ static vector<vector<double>> tracepath (vector<vector<double>> path,
 // 5.2. - 5.6. recursively fitting a straight or quadratic line segment on this sequence of path nodes,
 // called from tracepath()
 static vector<vector<double>> fitseq (vector<vector<double>> path,
-                                      float ltreshold,
-                                      float qtreshold,
+                                      double ltreshold,
+                                      double qtreshold,
                                       int seqstart,
                                       int seqend)
 {
@@ -806,7 +808,7 @@ static vector<vector<double>> fitseq (vector<vector<double>> path,
   if(curvepass)
   {
     segment.push_back(vector<double>(7,0));
-    auto& thissegment = segment[segment.size()-1];
+    auto& thissegment = segment.back();
     thissegment[0] = 1.0;
     thissegment[1] = path[seqstart][0];
     thissegment[2] = path[seqstart][1];
@@ -849,7 +851,7 @@ static vector<vector<double>> fitseq (vector<vector<double>> path,
   if(curvepass)
   {
     segment.push_back(vector<double>(7,0));
-    auto& thissegment = segment[segment.size()-1];
+    auto& thissegment = segment.back();
     thissegment[0] = 2.0;
     thissegment[1] = path[seqstart][0];
     thissegment[2] = path[seqstart][1];
@@ -866,7 +868,7 @@ static vector<vector<double>> fitseq (vector<vector<double>> path,
 
   // 5.6. Split sequence and recursively apply 5.2. - 5.6. to startpoint-splitpoint and splitpoint-endpoint sequences
   segment = fitseq(path,ltreshold,qtreshold,seqstart,splitpoint);
-  for (auto& v : fitseq(path,ltreshold,qtreshold,splitpoint,seqend))
+  for (const auto& v : fitseq(path,ltreshold,qtreshold,splitpoint,seqend))
     segment.push_back(v);
   return segment;
 
@@ -874,7 +876,10 @@ static vector<vector<double>> fitseq (vector<vector<double>> path,
 
 
 // 5. Batch tracing paths
-static vector<vector<vector<double>>> batchtracepaths (vector<vector<vector<double>>> internodepaths, float ltres,float qtres)
+static vector<vector<vector<double>>> batchtracepaths (
+  vector<vector<vector<double>>> internodepaths,
+  double ltres,
+  double qtres)
 {
   vector<vector<vector<double>>> btracedpaths;
   for(size_t k=0; k<internodepaths.size(); k++)
@@ -884,7 +889,10 @@ static vector<vector<vector<double>>> batchtracepaths (vector<vector<vector<doub
 
 
 // 5. Batch tracing layers
-static vector<vector<vector<vector<double>>>> batchtracelayers (vector<vector<vector<vector<double>>>> binternodes, float ltres, float qtres)
+static vector<vector<vector<vector<double>>>> batchtracelayers (
+  vector<vector<vector<vector<double>>>> binternodes,
+  double ltres,
+  double qtres)
 {
   vector<vector<vector<vector<double>>>> btbis;
   for(size_t k=0; k<binternodes.size(); k++)
@@ -899,31 +907,51 @@ static vector<vector<vector<vector<double>>>> batchtracelayers (vector<vector<ve
 //
 ////////////////////////////////////////////////////////////
 
-static float roundtodec (float val, float places)
+static double roundtodec (double val, double places)
 {
-  return (float)(round(val*pow(10,places))/pow(10,places));
+  return round(val*pow(10,places))/pow(10,places);
 }
-
 
 // Getting SVG path element string from a traced path
 static void svgpathstring (stringstream& sb,
-                           string desc,
-                           vector<vector<double>> segments,
-                           string colorstr,
-                           const map<string,float>& options)
+                           const string& desc,
+                           const vector<vector<double>>& segments,
+                           const string& colorstr,
+                           const map<string,double>& options)
 {
-  float scale = options.at("scale"), lcpr = options.at("lcpr"), qcpr = options.at("qcpr"), roundcoords = (float) floor(options.at("roundcoords"));
+  double scale = options.at("scale"), lcpr = options.at("lcpr"), qcpr = options.at("qcpr"), roundcoords = (double) floor(options.at("roundcoords"));
+
   // Path
-  sb << "<path " << desc << colorstr << " d=\"" << "M " << segments[0][1]*scale << " " << segments[0][2]*scale << " ";
+  sb << "<path "
+     << desc
+     << colorstr
+     << " d=\""
+     << "M "
+     << segments[0][1]*scale
+     << " "
+     << segments[0][2]*scale
+     << " ";
 
   if( roundcoords == -1 )
   {
     for(size_t pcnt=0;pcnt<segments.size();pcnt++)
     {
       if(segments[pcnt][0]==1.0)
-        sb << "L "<< segments[pcnt][3]*scale<< " "<< segments[pcnt][4]*scale<< " ";
+        sb << "L "
+           << segments[pcnt][3]*scale
+           << " "
+           << segments[pcnt][4]*scale
+           << " ";
       else
-        sb << "Q "<< segments[pcnt][3]*scale<< " "<< segments[pcnt][4]*scale<< " "<< segments[pcnt][5]*scale<< " "<< segments[pcnt][6]*scale<< " ";
+        sb << "Q "
+           << segments[pcnt][3]*scale
+           << " "
+           << segments[pcnt][4]*scale
+           << " "
+           << segments[pcnt][5]*scale
+           << " "
+           << segments[pcnt][6]*scale
+           << " ";
     }
   }
   else
@@ -933,21 +961,21 @@ static void svgpathstring (stringstream& sb,
       if(segments[pcnt][0]==1.0)
       {
         sb << "L "
-           << roundtodec(float(segments[pcnt][3]*scale),roundcoords) << " "
-           << roundtodec(float(segments[pcnt][4]*scale),roundcoords) << " ";
+           << roundtodec(double(segments[pcnt][3]*scale),roundcoords) << " "
+           << roundtodec(double(segments[pcnt][4]*scale),roundcoords) << " ";
       }
       else
       {
         sb << "Q "
-           << roundtodec(float(segments[pcnt][3]*scale),roundcoords) << " "
-           << roundtodec(float(segments[pcnt][4]*scale),roundcoords) << " "
-           << roundtodec(float(segments[pcnt][5]*scale),roundcoords) << " "
-           << roundtodec(float(segments[pcnt][6]*scale),roundcoords) << " ";
+           << roundtodec(double(segments[pcnt][3]*scale),roundcoords) << " "
+           << roundtodec(double(segments[pcnt][4]*scale),roundcoords) << " "
+           << roundtodec(double(segments[pcnt][5]*scale),roundcoords) << " "
+           << roundtodec(double(segments[pcnt][6]*scale),roundcoords) << " ";
       }
     }
   }// End of roundcoords check
 
-  sb<< "Z\" />";
+  sb << "Z\" />";
 
   // Rendering control points
   for(size_t pcnt=0;pcnt<segments.size();pcnt++)
@@ -1014,7 +1042,7 @@ static void svgpathstring (stringstream& sb,
 
 // Converting tracedata to an SVG string, paths are drawn according to a Z-index
 // the optional lcpr and qcpr are linear and quadratic control point radiuses
-static string getsvgstring (IndexedImage ii, map<string,float> options)
+static string getsvgstring (IndexedImage ii, map<string,double> options)
 {
   stringstream svgstr;
 
@@ -1031,7 +1059,7 @@ static string getsvgstring (IndexedImage ii, map<string,float> options)
 
   if(options.at("desc")!=0)
   {
-    svgstr << "desc=\"Created with ImageTracer.java version "
+    svgstr << "desc=\"Created with ImageTracerC++ version "
            << versionnumber+"\" ";
   }
   svgstr << ">";
@@ -1085,13 +1113,12 @@ static string getsvgstring (IndexedImage ii, map<string,float> options)
 
 }// End of getsvgstring()
 
-static string tosvgcolorstr (const vector<uint8_t>& c)
+static string tosvgcolorstr (const array<uint8_t,4>& c)
 {
   return format("fill=\"rgb({},{},{})\" stroke=\"rgb({},{},{})\" stroke-width=\"1\" opacity=\"{}\"",
                 c[0],c[1],c[2],
                 c[0],c[1],c[2],
                 c[3]/255);
-
 }
 
 
@@ -1105,7 +1132,7 @@ static constexpr double gks[5][11] = {
 
 
 // Selective Gaussian blur for preprocessing
-static ImageData blur (ImageData imgd, float rad, float del)
+static ImageData blur (ImageData imgd, double rad, double del)
 {
   int i,j,k,d,idx;
   double racc,gacc,bacc,aacc,wacc;
@@ -1231,13 +1258,11 @@ static int arraycontains (const vector<string>& arr, const string& str)
   for(size_t j=0; j<arr.size(); j++ )
   {
     if(toLowerCase(arr[j]) == str)
-    {
       return j;
-    }
   } return -1;
 }
 
-static float parsenext (vector<string>& arr, int i)
+static double parsenext (vector<string>& arr, int i)
 {
   if(i<((int)arr.size()-1))
     return atof(arr[i+1].c_str()); // Ignore errors at the moment
@@ -1276,26 +1301,30 @@ int main (int argc, char *argv[])
           "scale 1 simplifytolerance 0 roundcoords 1 lcpr 0 qcpr 0 desc 1 viewbox 0 blurradius 0 blurdelta 20 \n"
           "\nOnly <filename> is mandatory, if some of the other optional parameters are missing, they will be set to these defaults. "
           "\nWarning: if outfilename is not specified, then <filename>.svg will be overwritten."
-          "\nSee https://github.com/jankovicsandras/imagetracerjava for details. \nThis is version {}\n", versionnumber);
+          "\nSee https://github.com/dov/ImageTracerCpp for details. \nThis is version {}\n", versionnumber);
   }
   else
   {
     // Parameter parsing
     string outfilename = args[0]+".svg";
-    map<string,float> options;
+    map<string,double> options;
     string parameternames[] = {"ltres","qtres","pathomit","colorsampling","numberofcolors","mincolorratio","colorquantcycles","scale","simplifytolerance","roundcoords","lcpr","qcpr","desc","viewbox","blurradius","blurdelta","outfilename"};
-    int j = -1; float f = -1;
-    for (string parametername : parameternames)
+    int j = -1; double f = -1;
+    for (const string& parametername : parameternames)
     {
       j = arraycontains(args,parametername);
       if(j>-1)
       {
-        if(parametername=="outfilename"){
-          if( j < ((int)args.size()-1)){ outfilename = args[j+1]; }
+        if(parametername=="outfilename")
+        {
+          if( j < ((int)args.size()-1))
+            outfilename = args[j+1];
         }
         else
         {
-          f = parsenext(args,j); if(f>-1){ options[parametername] = f; }
+          f = parsenext(args,j);
+          if(f>-1)
+            options[parametername] = f; 
         }
       }
     }// End of parameternames loop
