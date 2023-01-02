@@ -79,11 +79,10 @@ static string imagedataToSVG (const ImageData& imgd,
                               map<string,double> options);
 static IndexedImage imagedataToTracedata (const ImageData& imgd,
                                           const map<string,double>& options);
-static string getsvgstring (IndexedImage ii, map<string,double> options);
+static string getsvgstring (const IndexedImage& ii, map<string,double> options);
 // This just turn an image into the "IndexedImage" (change of format)
-static IndexedImage colorquantization (ImageData imgd,
-                                       const map<string,double>& options);
-static vector<vector<vector<int>>> layering (IndexedImage ii);
+static IndexedImage imagedataToIndexedImage (const ImageData& imgd);
+static vector<vector<vector<int>>> layering (const IndexedImage& ii);
 static vector<vector<vector<int>>> pathscan (vector<vector<int>>& arr,
                                              int pathomit);
 static vector<vector<vector<vector<int>>>> batchpathscan(
@@ -199,15 +198,6 @@ static string imagedataToSVG (const ImageData& imgd,
 
 
 // Loading an image from a file, tracing when loaded, then returning IndexedImage with tracedata in layers
-static IndexedImage imageToTracedata (const string& filename,
-                                      map<string,double> options)
-{
-  options = checkoptions(options);
-  ImageData imgd = loadImageData(filename);
-  return imagedataToTracedata(imgd,options);
-}// End of imageToTracedata()
-
-
 vector<string> layer_colors = { "red", "green" };
 static void savePathsToGiv(const string& filename,
                            const vector<vector<vector<vector<int>>>>& bps)
@@ -299,8 +289,8 @@ static IndexedImage imagedataToTracedata (const ImageData& imgd,
 {
   // 1. Color quantization
   int64_t time0 = GetTimeInMillis();
-  IndexedImage ii = colorquantization(imgd, options);
-  print("colorquantization: {} ms\n", GetTimeInMillis()-time0);
+  IndexedImage ii = imagedataToIndexedImage(imgd);
+  print("imagedataToIndexedImage: {} ms\n", GetTimeInMillis()-time0);
   time0 = GetTimeInMillis();
   // 2. Layer separation and edge detection
   vector<vector<vector<int>>> rawlayers = layering(ii);   // Layer,y,x (rtl meaning of indices)
@@ -368,7 +358,7 @@ static map<string,double> checkoptions (map<string,double> options)
 
 // 1. Color quantization repeated "cycles" times, based on K-means clustering
 // https://en.wikipedia.org/wiki/Color_quantization    https://en.wikipedia.org/wiki/K-means_clustering
-static IndexedImage colorquantization (ImageData imgd, const map<string,double>& options)
+static IndexedImage imagedataToIndexedImage (const ImageData& imgd)
 {
   // Creating indexed color array arr which has a boundary filled with -1 in every direction
   vector<vector<int>> arr(imgd.height+2,
@@ -391,7 +381,7 @@ static IndexedImage colorquantization (ImageData imgd, const map<string,double>&
           arr[j+1][i+1] = imgd.data[j*imgd.width + i];
 
   return IndexedImage(arr);
-}// End of colorquantization
+}// End of imagedataToIndexedImage
 
 // 2. Layer separation and edge detection
 // Edge node types ( ▓:light or 1; ░:dark or 0 )
@@ -405,7 +395,7 @@ static IndexedImage colorquantization (ImageData imgd, const map<string,double>&
 //   - 1 : y (size height+2)
 //   - layer_idx
 // 
-static vector<vector<vector<int>>> layering (IndexedImage ii)
+static vector<vector<vector<int>>> layering (const IndexedImage& ii)
 {
   // Creating layers for each indexed color in arr
   int aw = ii.aray[0].size(), ah = ii.aray.size();
@@ -536,15 +526,12 @@ static vector<vector<vector<int>>> pathscan (vector<vector<int>>& arr,
           thispath.back()[2] = arr[py][px];
 
           // Next: look up the replacement, direction and coordinate changes = clear this cell, turn if required, walk forward
-          int old_px=px, old_py=py;
           const int8_t* lookuprow = pathscan_combined_lookup[ arr[py][px] ][ dir ];
           arr[py][px] = lookuprow[0];
           dir = lookuprow[1];
           px += lookuprow[2];
           py += lookuprow[3];
-#if 0 
-          print("Going from {},{} to {},{}\n", old_px, old_py, px, py);
-#endif
+
           // Close path
           if(((px-1)==thispath[0][0])&&((py-1)==thispath[0][1]))
           {
@@ -1046,7 +1033,7 @@ static void svgpathstring (stringstream& sb,
 
 // Converting tracedata to an SVG string, paths are drawn according to a Z-index
 // the optional lcpr and qcpr are linear and quadratic control point radiuses
-static string getsvgstring (IndexedImage ii, map<string,double> options)
+static string getsvgstring (const IndexedImage& ii, map<string,double> options)
 {
   stringstream svgstr;
 
