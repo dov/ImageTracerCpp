@@ -1,3 +1,7 @@
 *.o
 /.sconsign.dblite
 /ImageTracer
+/ImageTracerBW
+*.giv
+*.svg
+*.p[pbg]m
